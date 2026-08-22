@@ -1,0 +1,63 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // The only thing that determines ownership is the {userId} path segment
+    // matching the caller's own uid — never anything the client sends in
+    // the request body, and never a document ID a trader could guess or
+    // edit their way into.
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /users/{userId} {
+      // Not used by the app today, but locked down the same way in case a
+      // top-level profile document is added later.
+      allow read, write: if isOwner(userId);
+
+      match /customers/{customerId} {
+        allow read, delete: if isOwner(userId);
+
+        allow create: if isOwner(userId)
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 200
+          && (!('phone' in request.resource.data)
+              || request.resource.data.phone == null
+              || request.resource.data.phone is string)
+          && (!('photoUrl' in request.resource.data)
+              || request.resource.data.photoUrl == null
+              || request.resource.data.photoUrl is string);
+
+        allow update: if isOwner(userId)
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 200;
+      }
+
+      match /transactions/{transactionId} {
+        allow read, delete: if isOwner(userId);
+
+        allow create: if isOwner(userId)
+          && request.resource.data.customerId is string
+          && request.resource.data.customerId.size() > 0
+          && request.resource.data.type in ['credit', 'payment']
+          && request.resource.data.amount is number
+          && request.resource.data.amount > 0;
+
+        allow update: if isOwner(userId)
+          && request.resource.data.customerId is string
+          && request.resource.data.type in ['credit', 'payment']
+          && request.resource.data.amount is number
+          && request.resource.data.amount > 0;
+      }
+    }
+
+    // Everything not explicitly matched above is denied by default.
+  }
+}
